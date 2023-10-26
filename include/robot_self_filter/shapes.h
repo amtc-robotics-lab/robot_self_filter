@@ -39,7 +39,7 @@
 
 #include <cstdlib>
 #include <vector>
-#include <tf/LinearMath/Vector3.h>
+#include <tf2/LinearMath/Vector3.h>
 
 /** Definition of various shapes. No properties such as position are
     included. These are simply the descriptions and dimensions of
