@@ -37,22 +37,18 @@
 #include <algorithm>
 #include <set>
 #include "robot_self_filter/shapes.h"
-#include <resource_retriever/retriever.h>
-#include <ros/assert.h>
+#include <resource_retriever/retriever.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <rcpputils/asserts.hpp>
 #include <tinyxml.h>
-#if defined(ASSIMP_UNIFIED_HEADER_NAMES)
+
+
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <assimp/IOStream.hpp>
 #include <assimp/IOSystem.hpp>
-#else
-#include <assimp/assimp.hpp>
-#include <assimp/aiScene.h>
-#include <assimp/aiPostProcess.h>
-#include <assimp/IOStream.h>
-#include <assimp/IOSystem.h>
-#endif
+
 
 
 // \author Ioan Sucan ;  based on stl_to_mesh 
@@ -87,24 +83,27 @@ namespace shapes
 	  return to_read;
 	}
 
-	size_t Write( const void* buffer, size_t size, size_t count) { ROS_BREAK(); return 0; }
+	size_t Write( const void* buffer, size_t size, size_t count) {
+        rcpputils::assert_true(false);
+        return 0;
+    }
 
 	aiReturn Seek( size_t offset, aiOrigin origin)
 	{
 	  uint8_t* new_pos = 0;
 	  switch (origin)
 	  {
-	  case aiOrigin_SET:
-	    new_pos = res_.data.get() + offset;
-	    break;
-	  case aiOrigin_CUR:
-	    new_pos = pos_ + offset; // TODO is this right?  can offset really not be negative
-	    break;
-	  case aiOrigin_END:
-	    new_pos = res_.data.get() + res_.size - offset; // TODO is this right?
-	    break;
-	  default:
-	    ROS_BREAK();
+      case aiOrigin_SET:
+        new_pos = res_.data.get() + offset;
+        break;
+      case aiOrigin_CUR:
+        new_pos = pos_ + offset; // TODO is this right?  can offset really not be negative
+        break;
+      case aiOrigin_END:
+        new_pos = res_.data.get() + res_.size - offset; // TODO is this right?
+        break;
+      default:
+        rcpputils::assert_true(false);
 	  }
 
 	  if (new_pos < res_.data.get() || new_pos > res_.data.get() + res_.size)
@@ -129,8 +128,8 @@ namespace shapes
 	void Flush() {}
 
     private:
-	resource_retriever::MemoryResource res_;
-	uint8_t* pos_;
+      resource_retriever::MemoryResource res_;
+      uint8_t* pos_;
     };
 
   
@@ -148,44 +147,44 @@ namespace shapes
       // Check whether a specific file exists
       bool Exists(const char* file) const
       {
-	// Ugly -- two retrievals where there should be one (Exists + Open)
-	// resource_retriever needs a way of checking for existence
-	// TODO: cache this
-	resource_retriever::MemoryResource res;
-	try
-	{
-	  res = retriever_.get(file);
-	}
-	catch (resource_retriever::Exception& e)
-	{
-	  return false;
-	}
+        // Ugly -- two retrievals where there should be one (Exists + Open)
+        // resource_retriever needs a way of checking for existence
+        // TODO: cache this
+        resource_retriever::MemoryResource res;
+        try
+        {
+          res = retriever_.get(file);
+        }
+        catch (resource_retriever::Exception& e)
+        {
+          return false;
+        }
 
-	return true;
+        return true;
       }
 
       // Get the path delimiter character we'd like to see
       char getOsSeparator() const
       {
-	return '/';
+        return '/';
       }
 
       // ... and finally a method to open a custom stream
       Assimp::IOStream* Open(const char* file, const char* mode = "rb")
       {
-	// Ugly -- two retrievals where there should be one (Exists + Open)
-	// resource_retriever needs a way of checking for existence
-	resource_retriever::MemoryResource res;
-	try
-	{
-	  res = retriever_.get(file);
-	}
-	catch (resource_retriever::Exception& e)
-	{
-	  return 0;
-	}
+        // Ugly -- two retrievals where there should be one (Exists + Open)
+        // resource_retriever needs a way of checking for existence
+        resource_retriever::MemoryResource res;
+        try
+        {
+          res = retriever_.get(file);
+        }
+        catch (resource_retriever::Exception& e)
+        {
+          return 0;
+        }
 
-	return new ResourceIOStream(res);
+	      return new ResourceIOStream(res);
       }
 
       void Close(Assimp::IOStream* stream);
@@ -199,7 +198,7 @@ namespace shapes
       delete stream;
     }
 
-    float getMeshUnitRescale(const std::string& resource_path)
+    float getMeshUnitRescale(const std::string& resource_path, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
     {
       static std::map<std::string, float> rescale_cache;
 
@@ -210,17 +209,17 @@ namespace shapes
       resource_retriever::MemoryResource res;
       try
       {
-	res = retriever.get(resource_path);
+	      res = retriever.get(resource_path);
       }
       catch (resource_retriever::Exception& e)
       {
-	ROS_ERROR("%s", e.what());
-	return unit_scale;
+        RCLCPP_ERROR(node_logging_interface->get_logger(), "%s", e.what());
+        return unit_scale;
       }
   
       if (res.size == 0)
       {
-	return unit_scale;
+        return unit_scale;
       }
 
 
@@ -231,86 +230,86 @@ namespace shapes
       // Find the appropriate element if it exists
       if(!xmlDoc.Error())
       {
-	TiXmlElement * colladaXml = xmlDoc.FirstChildElement("COLLADA");
-	if(colladaXml)
-	{
-	  TiXmlElement *assetXml = colladaXml->FirstChildElement("asset");
-	  if(assetXml)
-	  {
-	    TiXmlElement *unitXml = assetXml->FirstChildElement("unit");
-	    if (unitXml && unitXml->Attribute("meter"))
-	    {
-	      // Failing to convert leaves unit_scale as the default.
-	      if(unitXml->QueryFloatAttribute("meter", &unit_scale) != 0)
-		ROS_WARN_STREAM("getMeshUnitRescale::Failed to convert unit element meter attribute to determine scaling. unit element: "
-				<< *unitXml);
-	    }
-	  }
-	}
+        TiXmlElement * colladaXml = xmlDoc.FirstChildElement("COLLADA");
+        if(colladaXml)
+        {
+          TiXmlElement *assetXml = colladaXml->FirstChildElement("asset");
+          if(assetXml)
+          {
+            TiXmlElement *unitXml = assetXml->FirstChildElement("unit");
+            if (unitXml && unitXml->Attribute("meter"))
+            {
+              // Failing to convert leaves unit_scale as the default.
+              if(unitXml->QueryFloatAttribute("meter", &unit_scale) != 0)
+              RCLCPP_WARN_STREAM(node_logging_interface->get_logger(), "getMeshUnitRescale::Failed to convert unit element meter attribute to determine scaling. unit element: "
+                  << *unitXml);
+            }
+          }
+        }
       }
       return unit_scale;
     }
 
-    std::vector<tf::Vector3> getVerticesFromAssimpNode(const aiScene* scene, const aiNode* node, const float scale)
+    std::vector<tf2::Vector3> getVerticesFromAssimpNode(const aiScene* scene, const aiNode* node, const float scale)
     {
-	std::vector<tf::Vector3> vertices;
-	if (!node)
-	{
-	  return vertices;
-	}
-	
-	aiMatrix4x4 transform = node->mTransformation;
-	aiNode *pnode = node->mParent;
-	while (pnode)
-	{
-	  // Don't convert to y-up orientation, which is what the root node in
-	  // Assimp does
-	  if (pnode->mParent != NULL)
-	    transform = pnode->mTransformation * transform;
-	  pnode = pnode->mParent;
-	}
-	
-	aiMatrix3x3 rotation(transform);
-	aiMatrix3x3 inverse_transpose_rotation(rotation);
-	inverse_transpose_rotation.Inverse();
-	inverse_transpose_rotation.Transpose();
-	
-	for (uint32_t i = 0; i < node->mNumMeshes; i++)
-	{
-	  aiMesh* input_mesh = scene->mMeshes[node->mMeshes[i]];
-	  // Add the vertices
-	  for (uint32_t j = 0; j < input_mesh->mNumVertices; j++)
-	  {
-	    aiVector3D p = input_mesh->mVertices[j];
-	    p *= transform;
-	    p *= scale;
-	    tf::Vector3 v(p.x, p.y, p.z);
-	    vertices.push_back(v);
-	  }
-	}
-	
-	for (uint32_t i=0; i < node->mNumChildren; ++i)
-	{
-	  std::vector<tf::Vector3> sub_vertices = getVerticesFromAssimpNode(scene,node->mChildren[i], scale);
-	  // Add vertices
-	  for (size_t j = 0; j < sub_vertices.size(); j++) {
-	    vertices.push_back(sub_vertices[j]);
-	  }
-	}
-	return vertices;
+      std::vector<tf2::Vector3> vertices;
+      if (!node)
+      {
+        return vertices;
+      }
+
+      aiMatrix4x4 transform = node->mTransformation;
+      aiNode *pnode = node->mParent;
+      while (pnode)
+      {
+        // Don't convert to y-up orientation, which is what the root node in
+        // Assimp does
+        if (pnode->mParent != NULL)
+          transform = pnode->mTransformation * transform;
+        pnode = pnode->mParent;
+      }
+
+      aiMatrix3x3 rotation(transform);
+      aiMatrix3x3 inverse_transpose_rotation(rotation);
+      inverse_transpose_rotation.Inverse();
+      inverse_transpose_rotation.Transpose();
+
+      for (uint32_t i = 0; i < node->mNumMeshes; i++)
+      {
+        aiMesh* input_mesh = scene->mMeshes[node->mMeshes[i]];
+        // Add the vertices
+        for (uint32_t j = 0; j < input_mesh->mNumVertices; j++)
+        {
+          aiVector3D p = input_mesh->mVertices[j];
+          p *= transform;
+          p *= scale;
+          tf2::Vector3 v(p.x, p.y, p.z);
+          vertices.push_back(v);
+        }
+      }
+
+      for (uint32_t i=0; i < node->mNumChildren; ++i)
+      {
+        std::vector<tf2::Vector3> sub_vertices = getVerticesFromAssimpNode(scene,node->mChildren[i], scale);
+        // Add vertices
+        for (size_t j = 0; j < sub_vertices.size(); j++) {
+          vertices.push_back(sub_vertices[j]);
+        }
+      }
+      return vertices;
     }
   
-    shapes::Mesh* meshFromAssimpScene(const std::string& name, const aiScene* scene)
+    shapes::Mesh* meshFromAssimpScene(const std::string& name, const aiScene* scene, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
     {
       if (!scene->HasMeshes())
       {
-	ROS_ERROR("No meshes found in file [%s]", name.c_str());
-	return NULL;
+        RCLCPP_ERROR(node_logging_interface->get_logger(), "No meshes found in file [%s]", name.c_str());
+        return NULL;
       }
       
-      float scale = getMeshUnitRescale(name);
+      float scale = getMeshUnitRescale(name, node_logging_interface);
 
-      std::vector<tf::Vector3> vertices = getVerticesFromAssimpNode(scene, scene->mRootNode, scale);
+      std::vector<tf2::Vector3> vertices = getVerticesFromAssimpNode(scene, scene->mRootNode, scale);
       
       return createMeshFromVertices(vertices);
     }
@@ -319,7 +318,7 @@ namespace shapes
     {
 	struct myVertex
 	{
-	    tf::Vector3    point;
+	    tf2::Vector3    point;
 	    unsigned int index;
 	};
 	
@@ -327,8 +326,8 @@ namespace shapes
 	{
 	    bool operator()(const myVertex &p1, const myVertex &p2) const
 	    {
-		const tf::Vector3 &v1 = p1.point;
-		const tf::Vector3 &v2 = p2.point;
+		const tf2::Vector3 &v1 = p1.point;
+		const tf2::Vector3 &v2 = p2.point;
 		if (v1.getX() < v2.getX())
 		    return true;
 		if (v1.getX() > v2.getX())
@@ -352,34 +351,34 @@ namespace shapes
 	};
     }
     
-    shapes::Mesh* createMeshFromVertices(const std::vector<tf::Vector3> &vertices, const std::vector<unsigned int> &triangles)
+    shapes::Mesh* createMeshFromVertices(const std::vector<tf2::Vector3> &vertices, const std::vector<unsigned int> &triangles)
     {
-	unsigned int nt = triangles.size() / 3;
-	shapes::Mesh *mesh = new shapes::Mesh(vertices.size(), nt);
-	for (unsigned int i = 0 ; i < vertices.size() ; ++i)
-	{
-	    mesh->vertices[3 * i    ] = vertices[i].getX();
-	    mesh->vertices[3 * i + 1] = vertices[i].getY();
-	    mesh->vertices[3 * i + 2] = vertices[i].getZ();
-	}
-	
-	std::copy(triangles.begin(), triangles.end(), mesh->triangles);
-	
-	// compute normals 
-	for (unsigned int i = 0 ; i < nt ; ++i)
-	{
-	    tf::Vector3 s1 = vertices[triangles[i * 3    ]] - vertices[triangles[i * 3 + 1]];
-	    tf::Vector3 s2 = vertices[triangles[i * 3 + 1]] - vertices[triangles[i * 3 + 2]];
-	    tf::Vector3 normal = s1.cross(s2);
-	    normal.normalize();
-	    mesh->normals[3 * i    ] = normal.getX();
-	    mesh->normals[3 * i + 1] = normal.getY();
-	    mesh->normals[3 * i + 2] = normal.getZ();
-	}
-	return mesh;
+      unsigned int nt = triangles.size() / 3;
+      shapes::Mesh *mesh = new shapes::Mesh(vertices.size(), nt);
+      for (unsigned int i = 0 ; i < vertices.size() ; ++i)
+      {
+          mesh->vertices[3 * i    ] = vertices[i].getX();
+          mesh->vertices[3 * i + 1] = vertices[i].getY();
+          mesh->vertices[3 * i + 2] = vertices[i].getZ();
+      }
+
+      std::copy(triangles.begin(), triangles.end(), mesh->triangles);
+
+      // compute normals
+      for (unsigned int i = 0 ; i < nt ; ++i)
+      {
+          tf2::Vector3 s1 = vertices[triangles[i * 3    ]] - vertices[triangles[i * 3 + 1]];
+          tf2::Vector3 s2 = vertices[triangles[i * 3 + 1]] - vertices[triangles[i * 3 + 2]];
+          tf2::Vector3 normal = s1.cross(s2);
+          normal.normalize();
+          mesh->normals[3 * i    ] = normal.getX();
+          mesh->normals[3 * i + 1] = normal.getY();
+          mesh->normals[3 * i + 2] = normal.getZ();
+      }
+      return mesh;
     }
     
-    shapes::Mesh* createMeshFromVertices(const std::vector<tf::Vector3> &source)
+    shapes::Mesh* createMeshFromVertices(const std::vector<tf2::Vector3> &source)
     {
 	if (source.size() < 3)
 	    return NULL;
@@ -415,14 +414,14 @@ namespace shapes
 	    triangles.push_back(vt.index);		
 	    
 	    vt.point = source[3 * i + 2];
-	    std::set<detail::myVertex, detail::ltVertexValue>::iterator p3 = vertices.find(vt);
+	    auto p3 = vertices.find(vt);
 	    if (p3 == vertices.end())
 	    {
-		vt.index = vertices.size();
-		vertices.insert(vt);		    
+        vt.index = vertices.size();
+        vertices.insert(vt);
 	    }
 	    else
-		vt.index = p3->index;
+		    vt.index = p3->index;
 
 	    triangles.push_back(vt.index);
 	}
@@ -448,9 +447,9 @@ namespace shapes
 	// compute normals 
 	for (unsigned int i = 0 ; i < nt ; ++i)
 	{
-	    tf::Vector3 s1 = vt[triangles[i * 3    ]].point - vt[triangles[i * 3 + 1]].point;
-	    tf::Vector3 s2 = vt[triangles[i * 3 + 1]].point - vt[triangles[i * 3 + 2]].point;
-	    tf::Vector3 normal = s1.cross(s2);
+	    tf2::Vector3 s1 = vt[triangles[i * 3    ]].point - vt[triangles[i * 3 + 1]].point;
+	    tf2::Vector3 s2 = vt[triangles[i * 3 + 1]].point - vt[triangles[i * 3 + 2]].point;
+	    tf2::Vector3 normal = s1.cross(s2);
 	    normal.normalize();
 	    mesh->normals[3 * i    ] = normal.getX();
 	    mesh->normals[3 * i + 1] = normal.getY();
@@ -471,7 +470,7 @@ namespace shapes
 	// make sure we have read enough data
 	if ((long)(50 * numTriangles + 84) <= size)
 	{
-	    std::vector<tf::Vector3> vertices;
+	    std::vector<tf2::Vector3> vertices;
 	    
 	    for (unsigned int currentTriangle = 0 ; currentTriangle < numTriangles ; ++currentTriangle)
 	    {
@@ -479,9 +478,9 @@ namespace shapes
 		pos += 12;
 		
 		// read vertices 
-		tf::Vector3 v1(0,0,0);
-		tf::Vector3 v2(0,0,0);
-		tf::Vector3 v3(0,0,0);
+		tf2::Vector3 v1(0,0,0);
+		tf2::Vector3 v2(0,0,0);
+		tf2::Vector3 v3(0,0,0);
 		
 		v1.setX(*(float*)pos);
 		pos += 4;
@@ -518,7 +517,7 @@ namespace shapes
 	return NULL;
     }
 
-    shapes::Mesh* createMeshFromBinaryDAE(const char* filename)
+    shapes::Mesh* createMeshFromBinaryDAE(const char* filename, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
     {
       std::string resource_path(filename);
       Assimp::Importer importer;
@@ -526,35 +525,35 @@ namespace shapes
       const aiScene* scene = importer.ReadFile(resource_path, aiProcess_SortByPType|aiProcess_GenNormals|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_FlipUVs);
       if (!scene)
       {
-        ROS_ERROR("Could not load resource [%s]: %s", resource_path.c_str(), importer.GetErrorString());
+        RCLCPP_ERROR(node_logging_interface->get_logger(), "Could not load resource [%s]: %s", resource_path.c_str(), importer.GetErrorString());
         return NULL;
       }
-      return meshFromAssimpScene(resource_path, scene);
+      return meshFromAssimpScene(resource_path, scene, node_logging_interface);
     }
   
     shapes::Mesh* createMeshFromBinaryStl(const char *filename)
     {
-	FILE* input = fopen(filename, "r");
-	if (!input)
-	    return NULL;
-	
-	fseek(input, 0, SEEK_END);
-	long fileSize = ftell(input);
-	fseek(input, 0, SEEK_SET);
-	
-	char* buffer = new char[fileSize];
-	size_t rd = fread(buffer, fileSize, 1, input);
-	
-	fclose(input);
-	
-	shapes::Mesh *result = NULL;
-	
-	if (rd == 1)
-    	    result = createMeshFromBinaryStlData(buffer, fileSize);
-	
-	delete[] buffer;
-	
-	return result;
+      FILE* input = fopen(filename, "r");
+      if (!input)
+          return NULL;
+
+      fseek(input, 0, SEEK_END);
+      long fileSize = ftell(input);
+      fseek(input, 0, SEEK_SET);
+
+      char* buffer = new char[fileSize];
+      size_t rd = fread(buffer, fileSize, 1, input);
+
+      fclose(input);
+
+      shapes::Mesh *result = NULL;
+
+      if (rd == 1)
+              result = createMeshFromBinaryStlData(buffer, fileSize);
+
+      delete[] buffer;
+
+      return result;
     }
     
 }

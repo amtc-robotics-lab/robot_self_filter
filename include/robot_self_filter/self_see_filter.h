@@ -32,7 +32,8 @@
 
 #include <filters/filter_base.h>
 #include <robot_self_filter/self_mask.h>
-#include <ros/console.h>
+#include <rcpputils/asserts.cpp>
+#include <rclcpp_lifecycle/lifecycle_node.hpp>
 
 namespace filters
 {
@@ -42,14 +43,15 @@ namespace filters
  */
 
 template <typename PointT>
-class SelfFilter: public FilterBase <pcl::PointCloud<PointT> >
+class SelfFilter: public FilterBase <pcl::PointCloud<PointT> >, public rclcpp_lifecycle::LifecycleNode
 {
     
 public:
   typedef pcl::PointCloud<PointT> PointCloud;
   /** \brief Construct the filter */
-  SelfFilter(ros::NodeHandle nh) : nh_(nh)
+  SelfFilter() : rclcpp_lifecycle::LifecycleNode("cloud_self_filter"),
   {
+    get_param()
     nh_.param<double>("min_sensor_dist", min_sensor_dist_, 0.01);
     double default_padding, default_scale;
     nh_.param<double>("self_see_default_padding", default_padding, .01);

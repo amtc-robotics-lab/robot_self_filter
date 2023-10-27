@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>robot_self_filter</name>
-  <version>0.2.00</version>
+  <version>0.2.0</version>
   <description>Filters the robot's body out of point clouds.</description>
   <maintainer email="dash@clearpathrobotics.com">Devon Ash</maintainer>
 
@@ -26,6 +26,7 @@
   <depend>assimp-dev</depend>
   <depend>tinyxml</depend>
   <depend>assimp</depend>
+  <depend>lifecycle_node</depend>
   
 
 

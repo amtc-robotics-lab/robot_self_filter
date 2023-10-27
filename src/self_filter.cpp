@@ -70,7 +70,7 @@ public:
     {
       self_filter_->getSelfMask()->getLinkNames(frames_);
     }
-    pointCloudPublisher_ = root_handle_.advertise<sensor_msgs::PointCloud2>("cloud_out", 1,
+    pointCloudPublisher_ = root_handle_.advertise<sensor_msgs::msg::PointCloud2>("cloud_out", 1,
                                                                             connect_cb, connect_cb);
   }
     
@@ -108,13 +108,13 @@ private:
     if(frames_.empty())
     {
       ROS_DEBUG("No valid frames have been passed into the self filter. Using a callback that will just forward scans on.");
-      no_filter_sub_ = root_handle_.subscribe<sensor_msgs::PointCloud2>("cloud_in", 1, boost::bind(&SelfFilter::noFilterCallback, this, _1));
+      no_filter_sub_ = root_handle_.subscribe<sensor_msgs::msg::PointCloud2>("cloud_in", 1, boost::bind(&SelfFilter::noFilterCallback, this, _1));
     }
     else
     {
       ROS_DEBUG("Valid frames were passed in. We'll filter them.");
       sub_.subscribe(root_handle_, "cloud_in", max_queue_size_);
-      mn_.reset(new tf::MessageFilter<sensor_msgs::PointCloud2>(sub_, tf_, "", max_queue_size_));
+      mn_.reset(new tf::MessageFilter<sensor_msgs::msg::PointCloud2>(sub_, tf_, "", max_queue_size_));
       mn_->setTargetFrames(frames_);
       mn_->registerCallback(boost::bind(&SelfFilter::cloudCallback, this, _1));
     }
@@ -129,19 +129,19 @@ private:
     }
   }
 
-  void noFilterCallback(const sensor_msgs::PointCloud2::ConstPtr &cloud){
+  void noFilterCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &cloud){
     pointCloudPublisher_.publish(cloud);
     ROS_DEBUG("Self filter publishing unfiltered frame");
   }
     
-  void cloudCallback(const sensor_msgs::PointCloud2::ConstPtr &cloud2) 
+  void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &cloud2)
   {
     ROS_DEBUG("Got pointcloud that is %f seconds old", (ros::Time::now() - cloud2->header.stamp).toSec());
     std::vector<int> mask;
     ros::WallTime tm = ros::WallTime::now();
 
     
-    sensor_msgs::PointCloud2 out2;
+    sensor_msgs::msg::PointCloud2 out2;
     int input_size = 0;
     int output_size = 0;
     if (use_rgb_)
@@ -177,8 +177,8 @@ private:
   //tf::MessageNotifier<robot_self_filter::PointCloud>           *mn_;
   ros::NodeHandle                                       nh_, root_handle_;
 
-  boost::shared_ptr<tf::MessageFilter<sensor_msgs::PointCloud2> >          mn_;
-  message_filters::Subscriber<sensor_msgs::PointCloud2> sub_;
+  boost::shared_ptr<tf::MessageFilter<sensor_msgs::msg::PointCloud2> >          mn_;
+  message_filters::Subscriber<sensor_msgs::msg::PointCloud2> sub_;
 
   filters::SelfFilter<pcl::PointXYZ> *self_filter_;
   filters::SelfFilter<pcl::PointXYZRGB> *self_filter_rgb_;

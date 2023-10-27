@@ -30,18 +30,17 @@
 #ifndef ROBOT_SELF_FILTER_SELF_MASK_
 #define ROBOT_SELF_FILTER_SELF_MASK_
 
-#include <rclcpp/utilities.hpp>
-#include<pcl/point_cloud.h>
+#include <rcpputils/asserts.hpp>
+#include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl_ros/point_cloud2.hpp>
-#include <sensor_msgs/msg/point_cloud.hpp>
+//#include <pcl_ros/point_cloud2.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <robot_self_filter/bodies.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
-#include <boost/bind.hpp>
-#include <boost/filesystem.hpp>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #include <urdf/model.h>
 #include <resource_retriever/retriever.hpp>
@@ -116,7 +115,7 @@ struct LinkInfo
 			    RCLCPP_WARN(loggingInterface->get_logger(),  "Retrieved empty mesh for resource '%s'", mesh->filename.c_str());
 			else
 			{
-			    boost::filesystem::path model_path(mesh->filename);
+			    std::filesystem::path model_path(mesh->filename);
 			    std::string ext = model_path.extension().string();
 			    if (ext == ".dae" || ext == ".DAE") {
 			      result = shapes::createMeshFromBinaryDAE(mesh->filename.c_str());
@@ -146,7 +145,7 @@ struct LinkInfo
      *
      */
     template <typename PointT>
-    class SelfMask
+    class SelfMask, public rclcpp_lifecycle::LifecycleNode
     {	
     protected:
 	
@@ -377,7 +376,7 @@ struct LinkInfo
 
             // we check if the point is a shadow point 
             tf2::Vector3 dir(sensor_pos_ - pt);
-            tfScalar  lng = dir.length();
+            tf2Scalar  lng = dir.length();
             if (lng < min_sensor_dist_)
               out = INSIDE;
             else
@@ -554,7 +553,7 @@ struct LinkInfo
           // compute a sphere that bounds the entire robot
           bodies::BoundingSphere bound;
           bodies::mergeBoundingSpheres(bspheres_, bound);	  
-          tfScalar radiusSquared = bound.radius * bound.radius;
+          tf2Scalar radiusSquared = bound.radius * bound.radius;
     
           // we now decide which points we keep
           //#pragma omp parallel for schedule(dynamic) 
@@ -580,7 +579,7 @@ struct LinkInfo
           // compute a sphere that bounds the entire robot
           bodies::BoundingSphere bound;
           bodies::mergeBoundingSpheres(bspheres_, bound);	  
-          tfScalar radiusSquared = bound.radius * bound.radius;
+          tf2Scalar radiusSquared = bound.radius * bound.radius;
 
           //std::cout << "Testing " << np << " points\n";
 
@@ -608,7 +607,7 @@ struct LinkInfo
             {
               // we check if the point is a shadow point 
               tf2::Vector3 dir(sensor_pos_ - pt);
-              tfScalar  lng = dir.length();
+              tf2Scalar  lng = dir.length();
               if (lng < min_sensor_dist_) {
 		out = INSIDE;
                 //std::cout << "Point " << i << " less than min sensor distance away\n";
