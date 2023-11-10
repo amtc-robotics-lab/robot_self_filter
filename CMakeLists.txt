@@ -11,7 +11,10 @@ ament_auto_find_build_dependencies()
 
 
 #common commands for building c++ executables and libraries
-ament_auto_add_library(robot_geometric_shapes src/load_mesh.cpp src/shapes.cpp src/bodies.cpp)
+ament_auto_add_library(robot_geometric_shapes SHARED src/load_mesh.cpp src/shapes.cpp src/bodies.cpp)
+target_link_libraries(robot_geometric_shapes assimp)
+ament_auto_add_library(${PROJECT_NAME} SHARED src/load_mesh.cpp src/shapes.cpp src/bodies.cpp)
+target_link_libraries(${PROJECT_NAME} robot_geometric_shapes assimp)
 
 #[[
 ament_auto_add_library(${PROJECT_NAME} src/self_mask.cpp)

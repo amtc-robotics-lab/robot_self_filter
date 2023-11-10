@@ -23,7 +23,7 @@
   <depend>visualization_msgs</depend>
   <depend>pcl</depend>
   <depend>pcl_ros</depend>
-  <depend>assimp-dev</depend>
+<!-- /<depend>assimp-dev</depend>-->
   <depend>tinyxml</depend>
   <depend>assimp</depend>
   <depend>lifecycle_node</depend>
