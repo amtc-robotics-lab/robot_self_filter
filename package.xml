@@ -15,14 +15,16 @@
 
   <depend>rclcpp</depend>
   <depend>tf2</depend>
+  <depend>tf2_bullet</depend>
   <depend>filters</depend>
   <depend>sensor_msgs</depend>
   <depend>urdf</depend>
-  <depend>bullet</depend>
+  <depend>Bullet</depend>
   <depend>resource_retriever</depend>
   <depend>visualization_msgs</depend>
   <depend>pcl</depend>
   <depend>pcl_ros</depend>
+  <depend>Boost</depend>
 <!-- /<depend>assimp-dev</depend>-->
   <depend>tinyxml</depend>
   <depend>assimp</depend>
