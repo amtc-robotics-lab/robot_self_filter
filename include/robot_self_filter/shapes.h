@@ -40,6 +40,7 @@
 #include <cstdlib>
 #include <vector>
 #include <tf2/LinearMath/Vector3.h>
+#include <rclcpp/rclcpp.hpp>
 
 /** Definition of various shapes. No properties such as position are
     included. These are simply the descriptions and dimensions of
@@ -244,7 +245,7 @@ namespace shapes
 
     /** \brief Load a mesh from a binary DAE file. Normals are
 	recomputed and repeating vertices are identified. */
-    Mesh* createMeshFromBinaryDAE(const char* filename);
+    Mesh* createMeshFromBinaryDAE(const char* filename, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface);
 
   
     /** \brief Create a copy of a shape */
