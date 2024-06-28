@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16.3...3.20)
 project(robot_self_filter)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_BUILD_TYPE Release)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies(REQUIRED
