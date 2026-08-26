@@ -245,7 +245,7 @@ namespace shapes
 
     /** \brief Load a mesh from a binary DAE file. Normals are
 	recomputed and repeating vertices are identified. */
-    Mesh* createMeshFromBinaryDAE(const char* filename, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface);
+    Mesh* createMeshFromBinaryDAE(const char* filename, const rclcpp::Logger &logger = rclcpp::get_logger("robot_self_filter"));
 
   
     /** \brief Create a copy of a shape */

@@ -14,22 +14,23 @@
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
   <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <depend>tf2_bullet</depend>
-  <depend>filters</depend>
+  <depend>message_filters</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>visualization_msgs</depend>
   <depend>urdf</depend>
   <depend>Bullet</depend>
   <depend>resource_retriever</depend>
-  <depend>visualization_msgs</depend>
   <depend>pcl</depend>
+  <depend>pcl_conversions</depend>
   <depend>pcl_ros</depend>
   <depend>Boost</depend>
-<!-- /<depend>assimp-dev</depend>-->
-  <depend>tinyxml</depend>
+  <depend>tinyxml2_vendor</depend>
   <depend>assimp</depend>
-  <depend>lifecycle_node</depend>
-  
 
 
   <export>

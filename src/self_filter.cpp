@@ -1,13 +1,13 @@
 /*********************************************************************
 * Software License Agreement (BSD License)
-* 
+*
 *  Copyright (c) 2008, Willow Garage, Inc.
 *  All rights reserved.
-* 
+*
 *  Redistribution and use in source and binary forms, with or without
 *  modification, are permitted provided that the following conditions
 *  are met:
-* 
+*
 *   * Redistributions of source code must retain the above copyright
 *     notice, this list of conditions and the following disclaimer.
 *   * Redistributions in binary form must reproduce the above
@@ -17,7 +17,7 @@
 *   * Neither the name of the Willow Garage nor the names of its
 *     contributors may be used to endorse or promote products derived
 *     from this software without specific prior written permission.
-* 
+*
 *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 *  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
 *  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
@@ -34,172 +34,248 @@
 
 /** \author Ioan Sucan */
 
-#include <ros/ros.h>
-#include <sstream>
-#include "robot_self_filter/self_see_filter.h"
-#include <tf/message_filter.h>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_components/register_node_macro.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_types.h>
 #include <message_filters/subscriber.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/message_filter.h>
+#include <tf2_ros/create_timer_ros.h>
+
+#include "robot_self_filter/self_see_filter.h"
 
 namespace robot_self_filter
 {
-class SelfFilter
+
+/** \brief Removes the robot's own body from a PointCloud2 stream.
+ *
+ * Registered as an rclcpp component so it can be loaded into a composable-node
+ * container: when co-located in the same process as its upstream publisher and/or
+ * downstream subscriber, messages are handed over via intra-process transport instead
+ * of being serialized. The node publishes with unique_ptr ownership everywhere it can,
+ * which is what lets the middleware move (rather than copy) the message when there is
+ * a single intra-process subscriber.
+ */
+class SelfFilterNode : public rclcpp::Node
 {
 public:
-
-  SelfFilter(void): nh_("~"), subscribing_(false)
+  explicit SelfFilterNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions())
+  : rclcpp::Node("self_filter", options)
   {
-    nh_.param<std::string>("sensor_frame", sensor_frame_, std::string());
-    nh_.param("use_rgb", use_rgb_, false);
-    nh_.param("max_queue_size", max_queue_size_, 10);
-    if (use_rgb_) 
+    sensor_frame_ = declare_parameter<std::string>("sensor_frame", "");
+    use_rgb_ = declare_parameter<bool>("use_rgb", false);
+    keep_original_point_type_ = declare_parameter<bool>("keep_original_point_type", false);
+    max_queue_size_ = declare_parameter<int>("max_queue_size", 10);
+    min_sensor_dist_ = declare_parameter<double>("min_sensor_dist", 0.01);
+    default_padding_ = declare_parameter<double>("self_see_default_padding", 0.01);
+    default_scale_ = declare_parameter<double>("self_see_default_scale", 1.0);
+    keep_organized_ = declare_parameter<bool>("keep_organized", false);
+    invert_ = declare_parameter<bool>("invert", false);
+    link_names_param_ = declare_parameter<std::vector<std::string>>(
+      "self_see_links", std::vector<std::string>());
+
+    if (link_names_param_.empty())
+      RCLCPP_WARN(get_logger(), "No links specified for self filtering (parameter 'self_see_links').");
+
+    if (keep_original_point_type_ && use_rgb_)
+      RCLCPP_WARN(get_logger(),
+                   "'keep_original_point_type' is enabled; 'use_rgb' is ignored since the "
+                   "geometry test only needs x/y/z and every other field of the input cloud "
+                   "(including rgb) is passed through untouched.");
+
+    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
+    tf_buffer_->setCreateTimerInterface(std::make_shared<tf2_ros::CreateTimerROS>(
+      get_node_base_interface(), get_node_timers_interface()));
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+    pointCloudPublisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      "cloud_out", rclcpp::SensorDataQoS().keep_last(max_queue_size_));
+
+    // robot_description is expected to be published latched (transient local) by
+    // robot_state_publisher; we only need it once to build the collision bodies.
+    rclcpp::QoS description_qos(1);
+    description_qos.transient_local().reliable();
+    robotDescriptionSub_ = create_subscription<std_msgs::msg::String>(
+      "/robot_description", description_qos,
+      std::bind(&SelfFilterNode::robotDescriptionCallback, this, std::placeholders::_1));
+  }
+
+private:
+  void robotDescriptionCallback(const std_msgs::msg::String::SharedPtr msg)
+  {
+    if (self_filter_ || self_filter_rgb_)
+      return;
+
+    urdf::Model model;
+    if (!model.initString(msg->data))
     {
-      self_filter_rgb_ = new filters::SelfFilter<pcl::PointXYZRGB>(nh_);
+      RCLCPP_ERROR(get_logger(), "Unable to parse URDF description!");
+      return;
     }
-    else 
+
+    std::vector<robot_self_filter::LinkInfo> links;
+    links.reserve(link_names_param_.size());
+    for (const auto & name : link_names_param_)
     {
-      self_filter_ = new filters::SelfFilter<pcl::PointXYZ>(nh_);
+      robot_self_filter::LinkInfo li;
+      li.name = name;
+      li.padding = declare_parameter<double>("self_see_links." + name + ".padding", default_padding_);
+      li.scale = declare_parameter<double>("self_see_links." + name + ".scale", default_scale_);
+      links.push_back(li);
     }
-    ros::SubscriberStatusCallback connect_cb
-      = boost::bind( &SelfFilter::connectionCallback, this, _1);
-    
-    if (use_rgb_) 
+
+    if (keep_original_point_type_)
     {
-      self_filter_rgb_->getSelfMask()->getLinkNames(frames_);
-    }
-    else 
-    {
+      // Geometry test only ever needs x/y/z, regardless of what point type the input
+      // cloud actually carries -- so a plain PointXYZ filter is enough here.
+      self_filter_ = std::make_unique<robot_self_filter::SelfFilter<pcl::PointXYZ>>(
+        *tf_buffer_, model, links, invert_, keep_organized_, min_sensor_dist_, get_logger());
       self_filter_->getSelfMask()->getLinkNames(frames_);
     }
-    pointCloudPublisher_ = root_handle_.advertise<sensor_msgs::msg::PointCloud2>("cloud_out", 1,
-                                                                            connect_cb, connect_cb);
-  }
-    
-  ~SelfFilter(void)
-  {
-    if (self_filter_) 
+    else if (use_rgb_)
     {
-      delete self_filter_;
-    }
-    if (self_filter_rgb_)
-    {
-      delete self_filter_rgb_;
-    }
-  }
-    
-private:
-
-  void connectionCallback(const ros::SingleSubscriberPublisher& pub)
-  {
-    if (pointCloudPublisher_.getNumSubscribers() > 0) {
-      if (!subscribing_) {
-        subscribe();
-        subscribing_ = true;
-      }
-    }
-    else {
-      if (subscribing_) {
-        unsubscribe();
-        subscribing_ = false;
-      }
-    }
-  }
-  
-  void subscribe() {
-    if(frames_.empty())
-    {
-      ROS_DEBUG("No valid frames have been passed into the self filter. Using a callback that will just forward scans on.");
-      no_filter_sub_ = root_handle_.subscribe<sensor_msgs::msg::PointCloud2>("cloud_in", 1, boost::bind(&SelfFilter::noFilterCallback, this, _1));
+      self_filter_rgb_ = std::make_unique<robot_self_filter::SelfFilter<pcl::PointXYZRGB>>(
+        *tf_buffer_, model, links, invert_, keep_organized_, min_sensor_dist_, get_logger());
+      self_filter_rgb_->getSelfMask()->getLinkNames(frames_);
     }
     else
     {
-      ROS_DEBUG("Valid frames were passed in. We'll filter them.");
-      sub_.subscribe(root_handle_, "cloud_in", max_queue_size_);
-      mn_.reset(new tf::MessageFilter<sensor_msgs::msg::PointCloud2>(sub_, tf_, "", max_queue_size_));
-      mn_->setTargetFrames(frames_);
-      mn_->registerCallback(boost::bind(&SelfFilter::cloudCallback, this, _1));
+      self_filter_ = std::make_unique<robot_self_filter::SelfFilter<pcl::PointXYZ>>(
+        *tf_buffer_, model, links, invert_, keep_organized_, min_sensor_dist_, get_logger());
+      self_filter_->getSelfMask()->getLinkNames(frames_);
     }
+
+    if (!sensor_frame_.empty())
+      RCLCPP_INFO(get_logger(),
+                  "Self filter is removing shadow points for sensor in frame '%s'. Minimum distance to sensor is %f.",
+                  sensor_frame_.c_str(), min_sensor_dist_);
+
+    subscribeToCloud();
   }
 
-  void unsubscribe() {
-    if (frames_.empty()) {
-      no_filter_sub_.shutdown();
-    }
-    else {
-      sub_.unsubscribe();
-    }
-  }
-
-  void noFilterCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &cloud){
-    pointCloudPublisher_.publish(cloud);
-    ROS_DEBUG("Self filter publishing unfiltered frame");
-  }
-    
-  void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstPtr &cloud2)
+  void subscribeToCloud()
   {
-    ROS_DEBUG("Got pointcloud that is %f seconds old", (ros::Time::now() - cloud2->header.stamp).toSec());
-    std::vector<int> mask;
-    ros::WallTime tm = ros::WallTime::now();
+    rmw_qos_profile_t qos = rmw_qos_profile_sensor_data;
+    qos.depth = static_cast<size_t>(max_queue_size_);
 
-    
-    sensor_msgs::msg::PointCloud2 out2;
-    int input_size = 0;
-    int output_size = 0;
-    if (use_rgb_)
+    if (frames_.empty())
     {
-      typename pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-      pcl::fromROSMsg(*cloud2, *cloud);
-      pcl::PointCloud<pcl::PointXYZRGB> out;
-      self_filter_rgb_->updateWithSensorFrame(*cloud, out, sensor_frame_);
-      pcl::toROSMsg(out, out2);
-      out2.header.stamp = cloud2->header.stamp;
-      input_size = cloud->points.size();
+      RCLCPP_DEBUG(get_logger(),
+                   "No valid frames have been passed into the self filter. Using a callback that will just forward scans on.");
+      noFilterSub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        "cloud_in", rclcpp::SensorDataQoS().keep_last(max_queue_size_),
+        std::bind(&SelfFilterNode::noFilterCallback, this, std::placeholders::_1));
+    }
+    else
+    {
+      RCLCPP_DEBUG(get_logger(), "Valid frames were passed in. We'll filter them.");
+      cloudSub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>();
+      cloudSub_->subscribe(shared_from_this(), "cloud_in", qos);
+      tfFilter_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+        *cloudSub_, *tf_buffer_, "", max_queue_size_, shared_from_this());
+      tfFilter_->setTargetFrames(frames_);
+      tfFilter_->registerCallback(std::bind(&SelfFilterNode::cloudCallback, this, std::placeholders::_1));
+    }
+  }
+
+  void noFilterCallback(sensor_msgs::msg::PointCloud2::UniquePtr cloud)
+  {
+    RCLCPP_DEBUG(get_logger(), "Self filter publishing unfiltered frame");
+    // No self_see_links configured: forward the message as-is. Taking/publishing it by
+    // UniquePtr lets intra-process transport move it instead of copying it.
+    pointCloudPublisher_->publish(std::move(cloud));
+  }
+
+  void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud2)
+  {
+    // tf2_ros::MessageFilter hands us a ConstSharedPtr -- it needs shared ownership to
+    // buffer messages while waiting on tf, so that part can't be UniquePtr. The output
+    // we build ourselves, though, so it is published by UniquePtr below.
+    const rclcpp::Time start = now();
+
+    sensor_msgs::msg::PointCloud2::UniquePtr out2;
+    size_t input_size = cloud2->height*cloud2->width, output_size = 0;
+    if (input_size == 0){
+      RCLCPP_WARN(get_logger(), "empty cloud, not filtering");
+      pointCloudPublisher_->publish(*cloud2);
+      return;
+    }
+    if (keep_original_point_type_)
+    {
+      // Only x/y/z are needed for the geometry test; every other byte of the original
+      // message (whatever point type it is) is carried through untouched.
+      pcl::PointCloud<pcl::PointXYZ> cloud;
+      pcl::fromROSMsg(*cloud2, cloud);
+      std::vector<int> mask;
+      self_filter_->computeMask(cloud, mask, sensor_frame_);
+      out2 = robot_self_filter::filterKeepingPointType(*cloud2, mask, invert_, keep_organized_);
+      input_size = cloud.points.size();
+      output_size = static_cast<size_t>(out2->width) * out2->height;
+    }
+    else if (use_rgb_)
+    {
+      pcl::PointCloud<pcl::PointXYZRGB> cloud, out;
+      pcl::fromROSMsg(*cloud2, cloud);
+      self_filter_rgb_->updateWithSensorFrame(cloud, out, sensor_frame_);
+      out2 = std::make_unique<sensor_msgs::msg::PointCloud2>();
+      pcl::toROSMsg(out, *out2);
+      input_size = cloud.points.size();
       output_size = out.points.size();
     }
     else
     {
-      typename pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
-      pcl::fromROSMsg(*cloud2, *cloud);
-      pcl::PointCloud<pcl::PointXYZ> out;
-      self_filter_->updateWithSensorFrame(*cloud, out, sensor_frame_);
-      pcl::toROSMsg(out, out2);
-      out2.header.stamp = cloud2->header.stamp;
-      input_size = cloud->points.size();
+      pcl::PointCloud<pcl::PointXYZ> cloud, out;
+      pcl::fromROSMsg(*cloud2, cloud);
+      self_filter_->updateWithSensorFrame(cloud, out, sensor_frame_);
+      out2 = std::make_unique<sensor_msgs::msg::PointCloud2>();
+      pcl::toROSMsg(out, *out2);
+      input_size = cloud.points.size();
       output_size = out.points.size();
     }
-      
-    double sec = (ros::WallTime::now() - tm).toSec();
-    pointCloudPublisher_.publish(out2);
-    ROS_DEBUG("Self filter: reduced %d points to %d points in %f seconds", input_size, output_size, sec);
+    out2->header = cloud2->header;
 
+    const double sec = (now() - start).seconds();
+    RCLCPP_DEBUG(get_logger(), "Self filter: reduced %zu points to %zu points in %f seconds",
+                 input_size, output_size, sec);
+    pointCloudPublisher_->publish(std::move(out2));
   }
-  
-  tf::TransformListener                                 tf_;
-  //tf::MessageNotifier<robot_self_filter::PointCloud>           *mn_;
-  ros::NodeHandle                                       nh_, root_handle_;
 
-  boost::shared_ptr<tf::MessageFilter<sensor_msgs::msg::PointCloud2> >          mn_;
-  message_filters::Subscriber<sensor_msgs::msg::PointCloud2> sub_;
-
-  filters::SelfFilter<pcl::PointXYZ> *self_filter_;
-  filters::SelfFilter<pcl::PointXYZRGB> *self_filter_rgb_;
+  // parameters
   std::string sensor_frame_;
-  bool use_rgb_;
-  bool subscribing_;
+  bool use_rgb_ = false;
+  bool keep_original_point_type_ = false;
+  int max_queue_size_ = 10;
+  double min_sensor_dist_ = 0.01;
+  double default_padding_ = 0.01;
+  double default_scale_ = 1.0;
+  bool keep_organized_ = false;
+  bool invert_ = false;
+  std::vector<std::string> link_names_param_;
+
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+  std::unique_ptr<robot_self_filter::SelfFilter<pcl::PointXYZ>> self_filter_;
+  std::unique_ptr<robot_self_filter::SelfFilter<pcl::PointXYZRGB>> self_filter_rgb_;
   std::vector<std::string> frames_;
-  
-  ros::Publisher                                        pointCloudPublisher_;
-  ros::Subscriber                                       no_filter_sub_;
-  int max_queue_size_;
+
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointCloudPublisher_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr robotDescriptionSub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr noFilterSub_;
+
+  std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> cloudSub_;
+  std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>> tfFilter_;
 };
-}
-    
-int main(int argc, char **argv)
-{
-  ros::init(argc, argv, "self_filter");
-  
-  ros::NodeHandle nh("~");
-  robot_self_filter::SelfFilter s;
-  ros::spin();
-    
-  return 0;
-}
+
+}  // namespace robot_self_filter
+
+RCLCPP_COMPONENTS_REGISTER_NODE(robot_self_filter::SelfFilterNode)

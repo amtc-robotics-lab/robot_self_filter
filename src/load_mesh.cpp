@@ -40,7 +40,7 @@
 #include <resource_retriever/retriever.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rcpputils/asserts.hpp>
-#include <tinyxml.h>
+#include <tinyxml2.h>
 
 
 #include <assimp/Importer.hpp>
@@ -198,12 +198,12 @@ namespace shapes
       delete stream;
     }
 
-    float getMeshUnitRescale(const std::string& resource_path, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
+    float getMeshUnitRescale(const std::string& resource_path, const rclcpp::Logger &logger)
     {
       static std::map<std::string, float> rescale_cache;
 
-      // Try to read unit to meter conversion ratio from mesh. Only valid in Collada XML formats. 
-      TiXmlDocument xmlDoc;
+      // Try to read unit to meter conversion ratio from mesh. Only valid in Collada XML formats.
+      tinyxml2::XMLDocument xmlDoc;
       float unit_scale(1.0);
       resource_retriever::Retriever retriever;
       resource_retriever::MemoryResource res;
@@ -213,10 +213,10 @@ namespace shapes
       }
       catch (resource_retriever::Exception& e)
       {
-        RCLCPP_ERROR(node_logging_interface->get_logger(), "%s", e.what());
+        RCLCPP_ERROR(logger, "%s", e.what());
         return unit_scale;
       }
-  
+
       if (res.size == 0)
       {
         return unit_scale;
@@ -230,19 +230,19 @@ namespace shapes
       // Find the appropriate element if it exists
       if(!xmlDoc.Error())
       {
-        TiXmlElement * colladaXml = xmlDoc.FirstChildElement("COLLADA");
+        tinyxml2::XMLElement * colladaXml = xmlDoc.FirstChildElement("COLLADA");
         if(colladaXml)
         {
-          TiXmlElement *assetXml = colladaXml->FirstChildElement("asset");
+          tinyxml2::XMLElement *assetXml = colladaXml->FirstChildElement("asset");
           if(assetXml)
           {
-            TiXmlElement *unitXml = assetXml->FirstChildElement("unit");
+            tinyxml2::XMLElement *unitXml = assetXml->FirstChildElement("unit");
             if (unitXml && unitXml->Attribute("meter"))
             {
               // Failing to convert leaves unit_scale as the default.
-              if(unitXml->QueryFloatAttribute("meter", &unit_scale) != 0)
-              RCLCPP_WARN_STREAM(node_logging_interface->get_logger(), "getMeshUnitRescale::Failed to convert unit element meter attribute to determine scaling. unit element: "
-                  << *unitXml);
+              if(unitXml->QueryFloatAttribute("meter", &unit_scale) != tinyxml2::XML_SUCCESS)
+                RCLCPP_WARN(logger, "getMeshUnitRescale::Failed to convert unit element meter attribute to determine scaling. unit element meter attribute: %s",
+                    unitXml->Attribute("meter"));
             }
           }
         }
@@ -299,15 +299,15 @@ namespace shapes
       return vertices;
     }
   
-    shapes::Mesh* meshFromAssimpScene(const std::string& name, const aiScene* scene, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
+    shapes::Mesh* meshFromAssimpScene(const std::string& name, const aiScene* scene, const rclcpp::Logger &logger)
     {
       if (!scene->HasMeshes())
       {
-        RCLCPP_ERROR(node_logging_interface->get_logger(), "No meshes found in file [%s]", name.c_str());
+        RCLCPP_ERROR(logger, "No meshes found in file [%s]", name.c_str());
         return NULL;
       }
-      
-      float scale = getMeshUnitRescale(name, node_logging_interface);
+
+      float scale = getMeshUnitRescale(name, logger);
 
       std::vector<tf2::Vector3> vertices = getVerticesFromAssimpNode(scene, scene->mRootNode, scale);
       
@@ -517,7 +517,7 @@ namespace shapes
 	return NULL;
     }
 
-    shapes::Mesh* createMeshFromBinaryDAE(const char* filename, rclcpp::node_interfaces::NodeLoggingInterface::SharedPtr node_logging_interface)
+    shapes::Mesh* createMeshFromBinaryDAE(const char* filename, const rclcpp::Logger &logger)
     {
       std::string resource_path(filename);
       Assimp::Importer importer;
@@ -525,10 +525,10 @@ namespace shapes
       const aiScene* scene = importer.ReadFile(resource_path, aiProcess_SortByPType|aiProcess_GenNormals|aiProcess_Triangulate|aiProcess_GenUVCoords|aiProcess_FlipUVs);
       if (!scene)
       {
-        RCLCPP_ERROR(node_logging_interface->get_logger(), "Could not load resource [%s]: %s", resource_path.c_str(), importer.GetErrorString());
+        RCLCPP_ERROR(logger, "Could not load resource [%s]: %s", resource_path.c_str(), importer.GetErrorString());
         return NULL;
       }
-      return meshFromAssimpScene(resource_path, scene, node_logging_interface);
+      return meshFromAssimpScene(resource_path, scene, logger);
     }
   
     shapes::Mesh* createMeshFromBinaryStl(const char *filename)
