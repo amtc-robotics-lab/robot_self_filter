@@ -478,40 +478,24 @@ bool bodies::Box::intersectsRay(const tf2::Vector3& origin, const tf2::Vector3& 
 	}
 	else
 	{
-	    if (i == 0)
-	    {
-		if ((std::min(m_corner1.y(), m_corner2.y()) > origin.y() ||
-		     std::max(m_corner1.y(), m_corner2.y()) < origin.y()) && 
-		    (std::min(m_corner1.z(), m_corner2.z()) > origin.z() ||
-		     std::max(m_corner1.z(), m_corner2.z()) < origin.z()))
-		    return false;
-	    }
-	    else
-	    {
-		if (i == 1)
-		{
-		    if ((std::min(m_corner1.x(), m_corner2.x()) > origin.x() ||
-			 std::max(m_corner1.x(), m_corner2.x()) < origin.x()) && 
-			(std::min(m_corner1.z(), m_corner2.z()) > origin.z() ||
-			 std::max(m_corner1.z(), m_corner2.z()) < origin.z()))
-			return false;
-		}
-		else
-		    if ((std::min(m_corner1.x(), m_corner2.x()) > origin.x() ||
-			 std::max(m_corner1.x(), m_corner2.x()) < origin.x()) && 
-			(std::min(m_corner1.y(), m_corner2.y()) > origin.y() ||
-			 std::max(m_corner1.y(), m_corner2.y()) < origin.y()))
-			return false;
-	    }
+	    // ray parallel to this pair of faces: it misses the box if it lies outside the slab
+	    const double half = i == 0 ? m_length2 : (i == 1 ? m_width2 : m_height2);
+	    if (fabs(vN.dot(origin - m_center)) > half)
+		return false;
 	}
     }
     
+    if (t_far < 0.0)
+	return false;
+    
     if (intersections)
     {
-	if (t_far - t_near > ZERO)
+	// intersections behind the origin are not reported: a ray starting inside the box only
+	// leaves it through t_far
+	if (t_near > ZERO && t_far - t_near > ZERO)
 	{
 	    intersections->push_back(t_near * dir + origin);
-	    if (count > 1)
+	    if (count == 0 || count > 1)
 		intersections->push_back(t_far  * dir + origin);
 	}
 	else

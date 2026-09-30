@@ -147,7 +147,8 @@ public:
 
     for (unsigned int i = 0 ; i < np ; ++i)
     {
-      if ((keep[i] && invert_) || (!keep[i] && !invert_))
+      const bool onRobot = (keep[i] != robot_self_filter::OUTSIDE);
+      if (invert_ ? !onRobot : onRobot)
       {
         data_out.points.push_back(data_in.points[i]);
       }
@@ -169,7 +170,9 @@ public:
     nan_point.z = std::numeric_limits<float>::quiet_NaN();
     for (unsigned int i = 0 ; i < np ; ++i)
     {
-      const bool onRobot = (keep[i] == robot_self_filter::INSIDE);
+      // SHADOW points lie behind the robot as seen from the sensor and should not have been
+      // seen, so they are removed together with the points inside the robot
+      const bool onRobot = (keep[i] != robot_self_filter::OUTSIDE);
       const bool keepPoint = invert_ ? onRobot : !onRobot;
       if (keepPoint)
       {
@@ -268,7 +271,8 @@ inline sensor_msgs::msg::PointCloud2::UniquePtr filterKeepingPointType(
   constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
   const auto keepPoint = [invert](int m) {
-    const bool onRobot = (m == robot_self_filter::INSIDE);
+    // SHADOW points are removed together with the points inside the robot
+    const bool onRobot = (m != robot_self_filter::OUTSIDE);
     return invert ? onRobot : !onRobot;
   };
 

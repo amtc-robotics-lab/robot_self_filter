@@ -374,6 +374,13 @@ public:
       if (bodies_[j].unscaledBody->containsPoint(pt))
         out = INSIDE;
 
+    // a point inside the padded body is on the robot; this has to be decided before the
+    // shadow test, because a ray leaving the padded body from the inside would otherwise
+    // tag it as a shadow point
+    for (unsigned int j = 0 ; out == OUTSIDE && j < bs ; ++j)
+      if (bodies_[j].body->containsPoint(pt))
+        out = INSIDE;
+
     if (out == OUTSIDE)
     {
       // we check if the point is a shadow point
@@ -401,11 +408,6 @@ public:
             }
           }
         }
-
-        // if it is not a shadow point, we check if it is inside the scaled body
-        for (unsigned int j = 0 ; out == OUTSIDE && j < bs ; ++j)
-          if (bodies_[j].body->containsPoint(pt))
-            out = INSIDE;
       }
     }
     return out;
@@ -584,7 +586,14 @@ protected:
           if (bodies_[j].unscaledBody->containsPoint(pt))
             out = INSIDE;
 
-      // if the point is not inside the unscaled body,
+      // then in the padded/scaled body; this has to come before the shadow test, because a
+      // ray leaving the padded body from the inside would otherwise tag the point as shadow
+      if (out == OUTSIDE && bound.center.distance2(pt) < radiusSquared)
+        for (unsigned int j = 0 ; out == OUTSIDE && j < bs ; ++j)
+          if (bodies_[j].body->containsPoint(pt))
+            out = INSIDE;
+
+      // if the point is not inside the robot,
       if (out == OUTSIDE)
       {
         // we check if the point is a shadow point
@@ -612,12 +621,6 @@ protected:
               }
             }
           }
-          // if it is not a shadow point, we check if it is inside the scaled body
-          if (out == OUTSIDE && bound.center.distance2(pt) < radiusSquared)
-            for (unsigned int j = 0 ; out == OUTSIDE && j < bs ; ++j)
-              if (bodies_[j].body->containsPoint(pt)) {
-                out = INSIDE;
-              }
         }
       }
       mask[i] = out;
