@@ -65,6 +65,17 @@ namespace bodies
 	double    radius;
     };
     
+    /** \brief Padded and scaled geometry of a body in the body's own frame (before its
+        pose is applied), as it is used for point inclusion. Meant for visualization. */
+    struct PaddedGeometry
+    {
+	shapes::ShapeType type = shapes::UNKNOWN_SHAPE;
+	/** box: full side lengths; sphere: diameter in x, y and z; cylinder: diameter in x and y, length in z */
+	tf2::Vector3 size = tf2::Vector3(0, 0, 0);
+	/** mesh: triangle list (3 consecutive vertices per triangle) */
+	std::vector<tf2::Vector3> triangles;
+    };
+    
     /** \brief A body is a shape + its pose. Point inclusion, ray
 	intersection can be tested, volumes and bounding spheres can
 	be computed.*/
@@ -161,6 +172,9 @@ namespace bodies
 	    pose. Scaling and padding are accounted for. */
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const = 0;
 	
+	/** \brief Get the padded and scaled geometry, in the frame of the body */
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const = 0;
+	
     protected:
 	
 	virtual void updateInternalData(void) = 0;
@@ -194,6 +208,7 @@ namespace bodies
 	virtual bool containsPoint(const tf2::Vector3 &p, bool verbose=false) const;
 	virtual double computeVolume(void) const;
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const;
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const;
 	virtual bool intersectsRay(const tf2::Vector3& origin, const tf2::Vector3 &dir, std::vector<tf2::Vector3> *intersections = NULL, unsigned int count = 0) const;
 
     protected:
@@ -229,6 +244,7 @@ namespace bodies
 	virtual bool containsPoint(const tf2::Vector3 &p, bool verbose=false) const;
 	virtual double computeVolume(void) const;
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const;
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const;
 	virtual bool intersectsRay(const tf2::Vector3& origin, const tf2::Vector3 &dir, std::vector<tf2::Vector3> *intersections = NULL, unsigned int count = 0) const;
 
     protected:
@@ -274,6 +290,7 @@ namespace bodies
 	virtual bool containsPoint(const tf2::Vector3 &p, bool verbose = false) const;
 	virtual double computeVolume(void) const;
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const;
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const;
 	virtual bool intersectsRay(const tf2::Vector3& origin, const tf2::Vector3 &dir, std::vector<tf2::Vector3> *intersections = NULL, unsigned int count = 0) const;
 
     protected:
@@ -333,6 +350,7 @@ namespace bodies
 	\\\ \brief This function is approximate. It returns the volume of the AABB enclosing the shape 
 	virtual double computeVolume(void) const;
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const;
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const;
 	virtual bool intersectsRay(const tf2::Vector3& origin, const tf2::Vector3 &dir, std::vector<tf2::Vector3> *intersections = NULL, unsigned int count = 0) const;
 	
     protected:
@@ -376,6 +394,7 @@ namespace bodies
 	virtual double computeVolume(void) const;
 	
 	virtual void computeBoundingSphere(BoundingSphere &sphere) const;
+	virtual void getPaddedGeometry(PaddedGeometry &geometry) const;
 	virtual bool intersectsRay(const tf2::Vector3& origin, const tf2::Vector3 &dir, std::vector<tf2::Vector3> *intersections = NULL, unsigned int count = 0) const;
 
     protected:

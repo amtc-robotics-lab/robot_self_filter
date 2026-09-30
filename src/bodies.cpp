@@ -165,6 +165,14 @@ void bodies::Sphere::computeBoundingSphere(BoundingSphere &sphere) const
     sphere.radius = m_radiusU;
 }
 
+void bodies::Sphere::getPaddedGeometry(PaddedGeometry &geometry) const
+{
+    geometry.type = shapes::SPHERE;
+    const double d = 2.0 * m_radiusU;
+    geometry.size = tf2::Vector3(d, d, d);
+    geometry.triangles.clear();
+}
+
 bool bodies::Sphere::intersectsRay(const tf2::Vector3& origin, const tf2::Vector3& dir, std::vector<tf2::Vector3> *intersections, unsigned int count) const
 {
     if (distanceSQR(m_center, origin, dir) > m_radius2) return false;
@@ -275,6 +283,13 @@ void bodies::Cylinder::computeBoundingSphere(BoundingSphere &sphere) const
 {
     sphere.center = m_center;
     sphere.radius = m_radiusB;
+}
+
+void bodies::Cylinder::getPaddedGeometry(PaddedGeometry &geometry) const
+{
+    geometry.type = shapes::CYLINDER;
+    geometry.size = tf2::Vector3(2.0 * m_radiusU, 2.0 * m_radiusU, 2.0 * m_length2);
+    geometry.triangles.clear();
 }
 
 bool bodies::Cylinder::intersectsRay(const tf2::Vector3& origin, const tf2::Vector3& dir, std::vector<tf2::Vector3> *intersections, unsigned int count) const
@@ -442,6 +457,13 @@ void bodies::Box::computeBoundingSphere(BoundingSphere &sphere) const
 {
     sphere.center = m_center;
     sphere.radius = m_radiusB;
+}
+
+void bodies::Box::getPaddedGeometry(PaddedGeometry &geometry) const
+{
+    geometry.type = shapes::BOX;
+    geometry.size = tf2::Vector3(2.0 * m_length2, 2.0 * m_width2, 2.0 * m_height2);
+    geometry.triangles.clear();
 }
 
 bool bodies::Box::intersectsRay(const tf2::Vector3& origin, const tf2::Vector3& dir, std::vector<tf2::Vector3> *intersections, unsigned int count) const
@@ -841,6 +863,24 @@ void bodies::ConvexMesh::computeBoundingSphere(BoundingSphere &sphere) const
 {
     sphere.center = m_center;
     sphere.radius = m_radiusB;
+}
+
+/* Every face of the convex hull is drawn where containsPoint() puts it: scaled about the
+   mesh center and moved out along its normal by the padding. The gaps the padding opens
+   between neighbouring faces (the rounded edges and corners) are not drawn. */
+void bodies::ConvexMesh::getPaddedGeometry(PaddedGeometry &geometry) const
+{
+    geometry.type = shapes::MESH;
+    geometry.size = tf2::Vector3(1, 1, 1);
+    geometry.triangles.clear();
+    geometry.triangles.reserve(m_triangles.size());
+    for (unsigned int i = 0 ; i < m_planes.size() ; ++i)
+    {
+	const tf2::tf2Vector4& plane = m_planes[i];
+	const tf2::Vector3 offset = tf2::Vector3(plane.getX(), plane.getY(), plane.getZ()) * m_padding;
+	for (unsigned int j = 0 ; j < 3 ; ++j)
+	    geometry.triangles.push_back(m_meshCenter + (m_vertices[m_triangles[3 * i + j]] - m_meshCenter) * m_scale + offset);
+    }
 }
 
 /* Signed distance of a point (mesh frame) above the padded + scaled surface of

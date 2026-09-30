@@ -413,6 +413,31 @@ public:
     return out;
   }
 
+  /** \brief Padded geometry of one collision element, placed relative to its link frame */
+  struct PaddedLinkGeometry
+  {
+    std::string name;                   // link (tf frame) the element is attached to
+    tf2::Transform origin;              // collision origin inside the link frame
+    bodies::PaddedGeometry geometry;    // padded and scaled geometry in the collision frame
+  };
+
+  /** \brief Get the padded geometry of every collision element used for self filtering, for
+      visualization. It only depends on the configuration, not on the current robot pose. */
+  std::vector<PaddedLinkGeometry> getPaddedGeometries() const
+  {
+    std::vector<PaddedLinkGeometry> result;
+    result.reserve(bodies_.size());
+    for (const auto &link : bodies_)
+    {
+      PaddedLinkGeometry g;
+      g.name = link.name;
+      g.origin = link.constTransf;
+      link.body->getPaddedGeometry(g.geometry);
+      result.push_back(g);
+    }
+    return result;
+  }
+
   /** \brief Get the set of link names that have been instantiated for self filtering */
   void getLinkNames(std::vector<std::string> &frames) const
   {

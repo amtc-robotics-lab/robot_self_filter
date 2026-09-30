@@ -43,6 +43,7 @@
 #include <rclcpp_components/register_node_macro.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_types.h>
 #include <message_filters/subscriber.h>
@@ -99,6 +100,12 @@ public:
 
     pointCloudPublisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       "cloud_out", rclcpp::SensorDataQoS().keep_last(max_queue_size_));
+
+    // Padded collision geometries, for checking the filter in rviz. The markers are attached to
+    // the link frames (frame_locked), so they follow the robot and are published only once;
+    // transient_local lets subscribers that connect later still receive them.
+    markerPublisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+      "~/padded_geometries", rclcpp::QoS(1).reliable().transient_local());
 
     // robot_description is expected to be published latched (transient local) by
     // robot_state_publisher; we only need it once to build the collision bodies.
@@ -159,7 +166,74 @@ private:
                   "Self filter is removing shadow points for sensor in frame '%s'. Minimum distance to sensor is %f.",
                   sensor_frame_.c_str(), min_sensor_dist_);
 
+    if (self_filter_)
+      publishPaddedGeometries(*self_filter_->getSelfMask());
+    else if (self_filter_rgb_)
+      publishPaddedGeometries(*self_filter_rgb_->getSelfMask());
+
     subscribeToCloud();
+  }
+
+  template <typename PointT>
+  void publishPaddedGeometries(const robot_self_filter::SelfMask<PointT> & mask)
+  {
+    using visualization_msgs::msg::Marker;
+    visualization_msgs::msg::MarkerArray array;
+    int id = 0;
+    for (const auto & g : mask.getPaddedGeometries())
+    {
+      Marker mk;
+      mk.header.frame_id = g.name;
+      mk.ns = "padded_geometries";
+      mk.id = id++;
+      mk.action = Marker::ADD;
+      mk.frame_locked = true;
+      mk.color.r = 1.0f;
+      mk.color.g = 0.5f;
+      mk.color.b = 0.0f;
+      mk.color.a = 0.35f;
+      mk.pose.position.x = g.origin.getOrigin().x();
+      mk.pose.position.y = g.origin.getOrigin().y();
+      mk.pose.position.z = g.origin.getOrigin().z();
+      mk.pose.orientation.x = g.origin.getRotation().x();
+      mk.pose.orientation.y = g.origin.getRotation().y();
+      mk.pose.orientation.z = g.origin.getRotation().z();
+      mk.pose.orientation.w = g.origin.getRotation().w();
+      mk.scale.x = mk.scale.y = mk.scale.z = 1.0;
+      switch (g.geometry.type)
+      {
+        case robot_self_filter::shapes::BOX:
+          mk.type = Marker::CUBE;
+          break;
+        case robot_self_filter::shapes::SPHERE:
+          mk.type = Marker::SPHERE;
+          break;
+        case robot_self_filter::shapes::CYLINDER:
+          mk.type = Marker::CYLINDER;
+          break;
+        case robot_self_filter::shapes::MESH:
+          mk.type = Marker::TRIANGLE_LIST;
+          for (const auto & v : g.geometry.triangles)
+          {
+            geometry_msgs::msg::Point pt;
+            pt.x = v.x();
+            pt.y = v.y();
+            pt.z = v.z();
+            mk.points.push_back(pt);
+          }
+          break;
+        default:
+          continue;
+      }
+      if (mk.type != Marker::TRIANGLE_LIST)
+      {
+        mk.scale.x = g.geometry.size.x();
+        mk.scale.y = g.geometry.size.y();
+        mk.scale.z = g.geometry.size.z();
+      }
+      array.markers.push_back(mk);
+    }
+    markerPublisher_->publish(array);
   }
 
   void subscribeToCloud()
@@ -269,6 +343,7 @@ private:
   std::vector<std::string> frames_;
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointCloudPublisher_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markerPublisher_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr robotDescriptionSub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr noFilterSub_;
 
