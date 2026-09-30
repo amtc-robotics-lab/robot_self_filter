@@ -11,7 +11,7 @@ Bullet)
 
 #common commands for building c++ executables and libraries
 ament_auto_add_library(${PROJECT_NAME} SHARED src/load_mesh.cpp src/shapes.cpp src/bodies.cpp)
-target_link_libraries(${PROJECT_NAME} assimp)
+target_link_libraries(${PROJECT_NAME} assimp tinyxml2)
 
 # self_filter is built as an rclcpp component so it can be loaded into a composable-node
 # container and benefit from intra-process (zero-copy) transport; the register macro also
@@ -25,6 +25,14 @@ rclcpp_components_register_node(self_filter_component
 
 ament_auto_add_executable(test_filter src/test_filter.cpp)
 target_link_libraries(test_filter ${PROJECT_NAME} assimp)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_box_padding test/test_box_padding.cpp)
+  target_link_libraries(test_box_padding ${PROJECT_NAME} assimp)
+  ament_add_gtest(test_mesh_padding test/test_mesh_padding.cpp)
+  target_link_libraries(test_mesh_padding ${PROJECT_NAME} assimp)
+endif()
 
 ament_export_libraries(${PROJECT_NAME} self_filter_component)
 ament_export_dependencies(rclcpp rclcpp_components Bullet tf2_bullet tf2_ros sensor_msgs urdf tf2 resource_retriever assimp)

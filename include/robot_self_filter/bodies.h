@@ -385,10 +385,10 @@ namespace bodies
 	
 	unsigned int countVerticesBehindPlane(const tf2::tf2Vector4& planeNormal) const;
 	bool isPointInsidePlanes(const tf2::Vector3& point) const;
+	double signedDistanceToFace(unsigned int i, const tf2::Vector3& point) const;
 	
 	std::vector<tf2::tf2Vector4>    m_planes;
 	std::vector<tf2::Vector3>    m_vertices;
-	std::vector<tf2::Vector3>    m_scaledVertices;
 	std::vector<unsigned int> m_triangles;
 	tf2::Transform               m_iPose;
 	

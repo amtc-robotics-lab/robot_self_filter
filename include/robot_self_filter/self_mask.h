@@ -456,42 +456,52 @@ protected:
         continue;
       }
 
-      if (!(link->collision && link->collision->geometry))
+      // a link can have several <collision> elements; every one of them is filtered
+      std::vector<urdf::CollisionSharedPtr> collisions = link->collision_array;
+      if (collisions.empty() && link->collision)
+        collisions.push_back(link->collision);
+
+      bool has_geometry = false;
+      for (const auto &collision : collisions)
       {
+        if (!collision || !collision->geometry)
+          continue;
+        has_geometry = true;
+
+        shapes::Shape *shape = constructShape(collision->geometry.get(), logger_);
+
+        if (!shape)
+        {
+          RCLCPP_ERROR(logger_, "Unable to construct collision shape for link '%s'", links[i].name.c_str());
+          continue;
+        }
+
+        SeeLink sl;
+        sl.body = bodies::createBodyFromShape(shape);
+
+        if (sl.body)
+        {
+          sl.name = links[i].name;
+
+          // collision models may have an offset, in addition to what TF gives
+          // so we keep it around
+          sl.constTransf = urdfPose2TFTransform(collision->origin);
+
+          sl.body->setScale(links[i].scale);
+          sl.body->setPadding(links[i].padding);
+          RCLCPP_INFO(logger_, "Self see link name %s padding %f", links[i].name.c_str(), links[i].padding);
+          sl.volume = sl.body->computeVolume();
+          sl.unscaledBody = bodies::createBodyFromShape(shape);
+          bodies_.push_back(sl);
+        }
+        else
+          RCLCPP_WARN(logger_, "Unable to create point inclusion body for link '%s'", links[i].name.c_str());
+
+        delete shape;
+      }
+
+      if (!has_geometry)
         RCLCPP_WARN(logger_, "No collision geometry specified for link '%s'", links[i].name.c_str());
-        continue;
-      }
-
-      shapes::Shape *shape = constructShape(link->collision->geometry.get(), logger_);
-
-      if (!shape)
-      {
-        RCLCPP_ERROR(logger_, "Unable to construct collision shape for link '%s'", links[i].name.c_str());
-        continue;
-      }
-
-      SeeLink sl;
-      sl.body = bodies::createBodyFromShape(shape);
-
-      if (sl.body)
-      {
-        sl.name = links[i].name;
-
-        // collision models may have an offset, in addition to what TF gives
-        // so we keep it around
-        sl.constTransf = urdfPose2TFTransform(link->collision->origin);
-
-        sl.body->setScale(links[i].scale);
-        sl.body->setPadding(links[i].padding);
-        RCLCPP_INFO(logger_, "Self see link name %s padding %f", links[i].name.c_str(), links[i].padding);
-        sl.volume = sl.body->computeVolume();
-        sl.unscaledBody = bodies::createBodyFromShape(shape);
-        bodies_.push_back(sl);
-      }
-      else
-        RCLCPP_WARN(logger_, "Unable to create point inclusion body for link '%s'", links[i].name.c_str());
-
-      delete shape;
     }
 
     if (missing.str().size() > 0)

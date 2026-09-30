@@ -12,6 +12,7 @@
   <author>Eitan Marder-Eppstein</author>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>

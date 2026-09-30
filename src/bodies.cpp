@@ -709,9 +709,7 @@ bool bodies::ConvexMesh::containsPoint(const tf2::Vector3 &p, bool verbose) cons
 {
     if (m_boundingBox.containsPoint(p))
     {
-	tf2::Vector3 ip(m_iPose * p);
-	ip = m_meshCenter + (ip - m_meshCenter) * m_scale;
-	return isPointInsidePlanes(ip);
+	return isPointInsidePlanes(m_iPose * p);
     }
     else
 	return false;
@@ -853,13 +851,6 @@ void bodies::ConvexMesh::updateInternalData(void)
     m_radiusB = m_meshRadiusB * m_scale + m_padding;
     m_radiusBSqr = m_radiusB * m_radiusB;
 
-    m_scaledVertices.resize(m_vertices.size());
-    for (unsigned int i = 0 ; i < m_vertices.size() ; ++i)
-    {
-	tf2::Vector3 v(m_vertices[i] - m_meshCenter);
-	tf2Scalar l = v.length();
-	m_scaledVertices[i] = m_meshCenter + v * (m_scale + (l > ZERO ? m_padding / l : 0.0));
-    }
 }
 
 void bodies::ConvexMesh::computeBoundingSphere(BoundingSphere &sphere) const
@@ -868,16 +859,26 @@ void bodies::ConvexMesh::computeBoundingSphere(BoundingSphere &sphere) const
     sphere.radius = m_radiusB;
 }
 
+/* Signed distance of a point (mesh frame) above the padded + scaled surface of
+   face i: positive when outside. The surface is the face plane scaled by m_scale
+   about the mesh center and then moved out by m_padding along the face normal, so
+   every face is padded by the same amount. */
+double bodies::ConvexMesh::signedDistanceToFace(unsigned int i, const tf2::Vector3& point) const
+{
+    const tf2::tf2Vector4& plane = m_planes[i];
+    const tf2::Vector3 n(plane.getX(), plane.getY(), plane.getZ());
+    const double nc = n.dot(m_meshCenter);
+    const double faceOffset = -plane.getW();            // n . x = faceOffset on the face
+    const double surface = nc + m_scale * (faceOffset - nc) + m_padding;
+    return n.dot(point) - surface;
+}
+
 bool bodies::ConvexMesh::isPointInsidePlanes(const tf2::Vector3& point) const
 {
-    unsigned int numplanes = m_planes.size();
+    const unsigned int numplanes = m_planes.size();
     for (unsigned int i = 0 ; i < numplanes ; ++i)
-    {
-	const tf2::tf2Vector4& plane = m_planes[i];
-	tf2Scalar dist = plane.dot(point) + plane.getW() - m_padding - tf2Scalar(1e-6);
-	if (dist > tf2Scalar(0))
+	if (signedDistanceToFace(i, point) > tf2Scalar(1e-6))
 	    return false;
-    }
     return true;
 }
 
@@ -913,81 +914,48 @@ bool bodies::ConvexMesh::intersectsRay(const tf2::Vector3& origin, const tf2::Ve
     if (!m_boundingBox.intersectsRay(origin, dir)) return false;
     
     // transform the ray into the coordinate frame of the mesh
-    tf2::Vector3 orig(m_iPose * origin);
-    tf2::Vector3 dr(m_iPose.getBasis() * dir);
+    const tf2::Vector3 orig(m_iPose * origin);
+    const tf2::Vector3 dr(m_iPose.getBasis() * dir);
     
-    std::vector<detail::intersc> ipts;
-    
-    bool result = false;
-    
-    // for each triangle 
-    const unsigned int nt = m_triangles.size() / 3;
-    for (unsigned int i = 0 ; i < nt ; ++i)
+    // clip the ray against the padded half-spaces of every face, which is exactly
+    // the region containsPoint() accepts
+    double tNear = -INFINITY;
+    double tFar  =  INFINITY;
+    const unsigned int numplanes = m_planes.size();
+    for (unsigned int i = 0 ; i < numplanes ; ++i)
     {
-	tf2Scalar tmp = m_planes[i].dot(dr);
-	if (fabs(tmp) > ZERO)
+	const tf2::tf2Vector4& plane = m_planes[i];
+	const double denom = tf2::Vector3(plane.getX(), plane.getY(), plane.getZ()).dot(dr);
+	const double dist = signedDistanceToFace(i, orig);   // > 0 when the origin is outside this face
+	if (fabs(denom) < ZERO)
 	{
-	    double t = -(m_planes[i].dot(orig) + m_planes[i].getW()) / tmp;
-	    if (t > 0.0)
-	    {
-		const int i3 = 3 * i;
-		const int v1 = m_triangles[i3 + 0];
-		const int v2 = m_triangles[i3 + 1];
-		const int v3 = m_triangles[i3 + 2];
-		
-		const tf2::Vector3 &a = m_scaledVertices[v1];
-		const tf2::Vector3 &b = m_scaledVertices[v2];
-		const tf2::Vector3 &c = m_scaledVertices[v3];
-		
-		tf2::Vector3 cb(c - b);
-		tf2::Vector3 ab(a - b);
-		
-		// intersection of the plane defined by the triangle and the ray
-		tf2::Vector3 P(orig + dr * t);
-		
-		// check if it is inside the triangle
-		tf2::Vector3 pb(P - b);
-		tf2::Vector3 c1(cb.cross(pb));
-		tf2::Vector3 c2(cb.cross(ab));
-		if (c1.dot(c2) < 0.0)
-		    continue;
-		
-		tf2::Vector3 ca(c - a);
-		tf2::Vector3 pa(P - a);
-		tf2::Vector3 ba(-ab);
-		
-		c1 = ca.cross(pa);
-		c2 = ca.cross(ba);
-		if (c1.dot(c2) < 0.0)
-		    continue;
-		
-		c1 = ba.cross(pa);
-		c2 = ba.cross(ca);
-		
-		if (c1.dot(c2) < 0.0)
-		    continue;
-		
-		result = true;
-		if (intersections)
-		{
-		    detail::intersc ip(origin + dir * t, t);
-		    ipts.push_back(ip);
-		}
-		else
-		    break;
-	    }
+	    if (dist > 0.0)
+		return false;
+	    continue;
 	}
+	const double t = -dist / denom;
+	if (denom < 0.0)
+	    tNear = std::max(tNear, t);   // entering the half-space
+	else
+	    tFar = std::min(tFar, t);     // leaving the half-space
+	if (tNear > tFar)
+	    return false;
     }
-
+    if (numplanes == 0 || tFar <= 0.0)
+	return false;
+    
     if (intersections)
     {
-	std::sort(ipts.begin(), ipts.end(), detail::interscOrder());
-	const unsigned int n = count > 0 ? std::min<unsigned int>(count, ipts.size()) : ipts.size();
+	std::vector<double> ts;
+	if (tNear > 0.0)
+	    ts.push_back(tNear);
+	if (std::isfinite(tFar))
+	    ts.push_back(tFar);
+	const unsigned int n = count > 0 ? std::min<unsigned int>(count, ts.size()) : ts.size();
 	for (unsigned int i = 0 ; i < n ; ++i)
-	    intersections->push_back(ipts[i].pt);
+	    intersections->push_back(origin + dir * ts[i]);
     }
-    
-    return result;
+    return true;
 }
   
 }
