@@ -169,7 +169,7 @@ public:
     nan_point.z = std::numeric_limits<float>::quiet_NaN();
     for (unsigned int i = 0 ; i < np ; ++i)
     {
-      const bool onRobot = (keep[i] != robot_self_filter::OUTSIDE);
+      const bool onRobot = (keep[i] == robot_self_filter::INSIDE);
       const bool keepPoint = invert_ ? onRobot : !onRobot;
       if (keepPoint)
       {
@@ -268,7 +268,7 @@ inline sensor_msgs::msg::PointCloud2::UniquePtr filterKeepingPointType(
   constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 
   const auto keepPoint = [invert](int m) {
-    const bool onRobot = (m != robot_self_filter::OUTSIDE);
+    const bool onRobot = (m == robot_self_filter::INSIDE);
     return invert ? onRobot : !onRobot;
   };
 

@@ -95,7 +95,7 @@ public:
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_buffer_->setCreateTimerInterface(std::make_shared<tf2_ros::CreateTimerROS>(
       get_node_base_interface(), get_node_timers_interface()));
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this);
 
     pointCloudPublisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       "cloud_out", rclcpp::SensorDataQoS().keep_last(max_queue_size_));
