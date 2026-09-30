@@ -865,36 +865,117 @@ void bodies::ConvexMesh::computeBoundingSphere(BoundingSphere &sphere) const
     sphere.radius = m_radiusB;
 }
 
-/* Every face of the convex hull is drawn where containsPoint() puts it: scaled about the
-   mesh center and moved out along its normal by the padding. The gaps the padding opens
-   between neighbouring faces (the rounded edges and corners) are not drawn. */
+/* The padded body is the region containsPoint() accepts: the intersection of the padded face
+   half-spaces and of the padded bounding box (which cuts off the long spikes the padded faces
+   would make at sharp corners). Each face is drawn as its plane clipped by all the other
+   planes, so neighbouring faces meet without gaps (edges and corners are mitred, not
+   rounded, like in the point test). */
 void bodies::ConvexMesh::getPaddedGeometry(PaddedGeometry &geometry) const
 {
     geometry.type = shapes::MESH;
     geometry.size = tf2::Vector3(1, 1, 1);
     geometry.triangles.clear();
-    geometry.triangles.reserve(m_triangles.size());
+    if (m_vertices.empty())
+	return;
+
+    std::vector<tf2::Vector3> normals;
+    std::vector<double> offsets;
     for (unsigned int i = 0 ; i < m_planes.size() ; ++i)
     {
-	const tf2::tf2Vector4& plane = m_planes[i];
-	const tf2::Vector3 offset = tf2::Vector3(plane.getX(), plane.getY(), plane.getZ()) * m_padding;
-	for (unsigned int j = 0 ; j < 3 ; ++j)
-	    geometry.triangles.push_back(m_meshCenter + (m_vertices[m_triangles[3 * i + j]] - m_meshCenter) * m_scale + offset);
+	normals.push_back(tf2::Vector3(m_planes[i].getX(), m_planes[i].getY(), m_planes[i].getZ()));
+	offsets.push_back(faceSurfaceOffset(i));
+    }
+
+    // the padded bounding box used as early-out in containsPoint(), in the mesh frame
+    tf2::Vector3 lo = m_vertices[0], hi = m_vertices[0];
+    for (const tf2::Vector3 &v : m_vertices)
+    {
+	lo.setValue(std::min(lo.x(), v.x()), std::min(lo.y(), v.y()), std::min(lo.z(), v.z()));
+	hi.setValue(std::max(hi.x(), v.x()), std::max(hi.y(), v.y()), std::max(hi.z(), v.z()));
+    }
+    const tf2::Vector3 boxCenter = (lo + hi) / 2.0;
+    const tf2::Vector3 boxHalf = (hi - lo) * (m_scale / 2.0) + tf2::Vector3(m_padding, m_padding, m_padding);
+    for (int axis = 0 ; axis < 3 ; ++axis)
+	for (int sign = -1 ; sign <= 1 ; sign += 2)
+	{
+	    tf2::Vector3 n(0, 0, 0);
+	    n[axis] = sign;
+	    normals.push_back(n);
+	    offsets.push_back(n.dot(boxCenter) + boxHalf[axis]);
+	}
+
+    std::vector<unsigned int> faces;   // distinct planes (a flat face is made of several triangles)
+    for (unsigned int i = 0 ; i < normals.size() ; ++i)
+    {
+	bool duplicate = false;
+	for (unsigned int k : faces)
+	    if (normals[i].dot(normals[k]) > 1.0 - 1e-6 && fabs(offsets[i] - offsets[k]) < 1e-6)
+	    {
+		duplicate = true;
+		break;
+	    }
+	if (!duplicate)
+	    faces.push_back(i);
+    }
+
+    const double big = 4.0 * (m_meshRadiusB * m_scale + m_padding) + 1.0;
+    for (unsigned int i : faces)
+    {
+	const tf2::Vector3 &n = normals[i];
+	// a big square on the plane of face i
+	tf2::Vector3 u = fabs(n.x()) < 0.9 ? tf2::Vector3(1, 0, 0) : tf2::Vector3(0, 1, 0);
+	u = (u - n * n.dot(u)).normalized();
+	const tf2::Vector3 v = n.cross(u);
+	const tf2::Vector3 c = m_meshCenter + n * (offsets[i] - n.dot(m_meshCenter));
+	std::vector<tf2::Vector3> poly = {c + (u + v) * big, c + (v - u) * big, c - (u + v) * big, c + (u - v) * big};
+
+	// clip it by the half-space of every other face
+	for (unsigned int j : faces)
+	{
+	    if (j == i || poly.empty())
+		continue;
+	    std::vector<tf2::Vector3> clipped;
+	    for (size_t k = 0 ; k < poly.size() ; ++k)
+	    {
+		const tf2::Vector3 &p0 = poly[k];
+		const tf2::Vector3 &p1 = poly[(k + 1) % poly.size()];
+		const double d0 = normals[j].dot(p0) - offsets[j];   // > 0 is outside
+		const double d1 = normals[j].dot(p1) - offsets[j];
+		if (d0 <= 0.0)
+		    clipped.push_back(p0);
+		if ((d0 < 0.0 && d1 > 0.0) || (d0 > 0.0 && d1 < 0.0))
+		    clipped.push_back(p0 + (p1 - p0) * (d0 / (d0 - d1)));
+	    }
+	    poly.swap(clipped);
+	}
+
+	for (size_t k = 1 ; k + 1 < poly.size() ; ++k)
+	{
+	    geometry.triangles.push_back(poly[0]);
+	    geometry.triangles.push_back(poly[k]);
+	    geometry.triangles.push_back(poly[k + 1]);
+	}
     }
 }
 
-/* Signed distance of a point (mesh frame) above the padded + scaled surface of
-   face i: positive when outside. The surface is the face plane scaled by m_scale
-   about the mesh center and then moved out by m_padding along the face normal, so
-   every face is padded by the same amount. */
-double bodies::ConvexMesh::signedDistanceToFace(unsigned int i, const tf2::Vector3& point) const
+/* Offset of the padded + scaled surface of face i along the face normal: the surface is
+   the face plane scaled by m_scale about the mesh center and then moved out by m_padding
+   along the face normal, so every face is padded by the same amount. */
+double bodies::ConvexMesh::faceSurfaceOffset(unsigned int i) const
 {
     const tf2::tf2Vector4& plane = m_planes[i];
     const tf2::Vector3 n(plane.getX(), plane.getY(), plane.getZ());
     const double nc = n.dot(m_meshCenter);
     const double faceOffset = -plane.getW();            // n . x = faceOffset on the face
-    const double surface = nc + m_scale * (faceOffset - nc) + m_padding;
-    return n.dot(point) - surface;
+    return nc + m_scale * (faceOffset - nc) + m_padding;
+}
+
+/* Signed distance of a point (mesh frame) above the padded + scaled surface of face i:
+   positive when outside. */
+double bodies::ConvexMesh::signedDistanceToFace(unsigned int i, const tf2::Vector3& point) const
+{
+    const tf2::tf2Vector4& plane = m_planes[i];
+    return tf2::Vector3(plane.getX(), plane.getY(), plane.getZ()).dot(point) - faceSurfaceOffset(i);
 }
 
 bool bodies::ConvexMesh::isPointInsidePlanes(const tf2::Vector3& point) const

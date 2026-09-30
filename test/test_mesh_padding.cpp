@@ -108,6 +108,55 @@ TEST(MeshScale, RayFromInsideExitsAtPaddedSurface)
 
 INSTANTIATE_TEST_SUITE_P(Pads, MeshPadding, ::testing::Values(0.0, 0.2, 1.2));
 
+// The marker geometry must be a closed, gap-free surface: for a box mesh it has the exact
+// area of the padded box, and every vertex lies on the padded box surface.
+TEST(MeshPaddedGeometry, ClosedSurfaceWithoutGaps)
+{
+  auto mesh = boxMesh(0.5, 0.3, 0.2);
+  auto body = makeMeshBody(mesh.get(), 0.2);
+  bodies::PaddedGeometry g;
+  body->getPaddedGeometry(g);
+  ASSERT_EQ(g.type, shapes::MESH);
+  ASSERT_EQ(g.triangles.size() % 3, 0u);
+  double area = 0.0;
+  for (size_t i = 0; i < g.triangles.size(); i += 3)
+    area += 0.5 * (g.triangles[i + 1] - g.triangles[i]).cross(g.triangles[i + 2] - g.triangles[i]).length();
+  EXPECT_NEAR(area, 2 * (1.4 * 1.0 + 1.4 * 0.8 + 1.0 * 0.8), 1e-6);
+  for (const auto & v : g.triangles) {
+    EXPECT_LE(fabs(v.x()), 0.7 + 1e-6);
+    EXPECT_LE(fabs(v.y()), 0.5 + 1e-6);
+    EXPECT_LE(fabs(v.z()), 0.4 + 1e-6);
+    const bool on_surface = fabs(fabs(v.x()) - 0.7) < 1e-6 || fabs(fabs(v.y()) - 0.5) < 1e-6 || fabs(fabs(v.z()) - 0.4) < 1e-6;
+    EXPECT_TRUE(on_surface);
+  }
+}
+
+// Same check on a non-box hull (octahedron): the drawn surface is the boundary of the region
+// containsPoint() accepts.
+TEST(MeshPaddedGeometry, MatchesContainsPointOnOctahedron)
+{
+  auto m = std::make_unique<shapes::Mesh>(6, 8);
+  const double verts[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < 3; ++j) m->vertices[3 * i + j] = verts[i][j];
+  const unsigned int t[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4}, {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
+  for (int i = 0; i < 8; ++i)
+    for (int j = 0; j < 3; ++j) m->triangles[3 * i + j] = t[i][j];
+  auto body = makeMeshBody(m.get(), 0.3);
+  bodies::PaddedGeometry g;
+  body->getPaddedGeometry(g);
+  ASSERT_FALSE(g.triangles.empty());
+  for (size_t i = 0; i < g.triangles.size(); i += 3) {
+    for (int j = 0; j < 3; ++j)
+      EXPECT_TRUE(body->containsPoint(g.triangles[i + j] * (1.0 - 1e-4)));   // on the boundary, just inside
+    const tf2::Vector3 n = (g.triangles[i + 1] - g.triangles[i]).cross(g.triangles[i + 2] - g.triangles[i]).normalized();
+    const tf2::Vector3 centroid = (g.triangles[i] + g.triangles[i + 1] + g.triangles[i + 2]) / 3.0;
+    // one of the two sides must be outside: nudging the triangle along its normal leaves the body
+    EXPECT_TRUE(!body->containsPoint(centroid + n * 1e-3) || !body->containsPoint(centroid - n * 1e-3));
+    EXPECT_TRUE(body->containsPoint(centroid - n * 1e-3) || body->containsPoint(centroid + n * 1e-3));
+  }
+}
+
 // The pre-filter sphere must contain every body's own bounding sphere.
 TEST(BoundingSphereMerge, ContainsAllInputs)
 {

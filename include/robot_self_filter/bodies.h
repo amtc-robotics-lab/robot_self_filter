@@ -404,6 +404,7 @@ namespace bodies
 	
 	unsigned int countVerticesBehindPlane(const tf2::tf2Vector4& planeNormal) const;
 	bool isPointInsidePlanes(const tf2::Vector3& point) const;
+	double faceSurfaceOffset(unsigned int i) const;
 	double signedDistanceToFace(unsigned int i, const tf2::Vector3& point) const;
 	
 	std::vector<tf2::tf2Vector4>    m_planes;
